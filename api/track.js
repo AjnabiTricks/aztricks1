@@ -15,18 +15,17 @@ module.exports = async (req, res) => {
     if (!query) {
       return res.status(400).json({ 
         error: 'Please provide mobile number or CNIC',
-        format: 'Mobile: 03XXXXXXXXX or CNIC: 12345-1234567-1 or 1234512345671',
+        format: 'Mobile: 03XXXXXXXXX or CNIC: 1234512345671',
         credit: 'Credit: @AZ_Tricks (https://t.me/AZ_Tricks)'
       });
     }
 
-    // Clean input - remove all non-digits
     let cleanQuery = query.replace(/[^0-9]/g, '');
     
     if (cleanQuery.length < 10) {
       return res.status(400).json({
         error: 'Invalid input. Minimum 10 digits required',
-        format: 'Mobile: 03XXXXXXXXX (11 digits) or CNIC: 12345-1234567-1 (13 digits)',
+        format: 'Mobile: 03XXXXXXXXX (11 digits) or CNIC: 1234512345671 (13 digits)',
         credit: 'Credit: @AZ_Tricks (https://t.me/AZ_Tricks)'
       });
     }
@@ -58,7 +57,11 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       search_type: searchType,
       input: cleanQuery,
-      ...result,
+      number: result.number || 'Not Found',
+      name: result.name || 'Not Found',
+      cnic: result.cnic || 'Not Found',
+      address: result.address || 'Not Found',
+      status: result.status || 'Failed',
       credit: 'Credit: @AZ_Tricks (https://t.me/AZ_Tricks)'
     });
 
@@ -81,135 +84,177 @@ function parseHTML(html, query) {
   };
 
   try {
-    // Extract all text content
-    const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    // Clean HTML
+    const cleanHtml = html.replace(/\s+/g, ' ').trim();
     
-    // Extract table data with better parsing
-    const tableData = [];
-    const tableMatches = html.match(/<tr[^>]*>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<\/tr>/gi);
+    // Extract all visible text
+    const textContent = cleanHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     
-    if (tableMatches) {
-      tableMatches.forEach(row => {
-        const tdMatch = row.match(/<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/i);
-        if (tdMatch) {
-          const key = tdMatch[1].replace(/<[^>]*>/g, '').trim();
-          const value = tdMatch[2].replace(/<[^>]*>/g, '').trim();
-          if (key && value) {
-            tableData.push({ key: key.toLowerCase(), value: value });
-          }
-        }
-      });
+    // Find table data specifically
+    const tableRegex = /<td[^>]*>([\s\S]*?)<\/td>/g;
+    const tdMatches = [];
+    let match;
+    while ((match = tableRegex.exec(html)) !== null) {
+      const value = match[1].replace(/<[^>]*>/g, '').trim();
+      if (value) tdMatches.push(value);
     }
-
-    // Extract data from table
-    tableData.forEach(item => {
-      const key = item.key.toLowerCase();
-      const value = item.value;
-      
-      if (value && value.length > 1) {
-        // Name detection
-        if (key.includes('name') || key.includes('full name') || key.includes('customer') || 
-            key.includes('owner') || key.includes('holder') || key.includes('subscriber')) {
-          if (!result.name || result.name === 'Not Found') {
+    
+    // Extract data from table cells
+    if (tdMatches.length > 0) {
+      // Find name (usually in second cell)
+      for (let i = 0; i < tdMatches.length; i++) {
+        const value = tdMatches[i];
+        
+        // Check if this looks like a name (alphabetic, 2+ words)
+        if (/^[A-Za-z\s]{3,}$/.test(value) && value.length > 3 && !value.includes('@') && !value.includes('.')) {
+          if (result.name === 'Not Found' || result.name.includes('Network')) {
             result.name = value;
           }
         }
         
-        // CNIC detection
-        if (key.includes('cnic') || key.includes('nic') || key.includes('id') || 
-            key.includes('identification') || key.includes('identity')) {
-          const cleanCNIC = value.replace(/[^0-9]/g, '');
-          if (cleanCNIC.length === 13) {
-            result.cnic = cleanCNIC;
+        // Check for CNIC (13 digits)
+        const cnicMatch = value.match(/\b[0-9]{13}\b/);
+        if (cnicMatch) {
+          result.cnic = cnicMatch[0];
+        }
+        
+        // Check for mobile (11 digits starting with 03)
+        const mobileMatch = value.match(/\b03[0-9]{9}\b/);
+        if (mobileMatch) {
+          if (result.number === 'Not Found' || result.number.includes('Network')) {
+            result.number = mobileMatch[0];
           }
         }
         
-        // Address detection
-        if (key.includes('address') || key.includes('location') || key.includes('city') || 
-            key.includes('district') || key.includes('province') || key.includes('area')) {
-          if (!result.address || result.address === 'Not Found') {
+        // Check for address (contains city, street, etc)
+        if (/[A-Za-z]+\s+[A-Za-z]+,\s*[A-Za-z]+/i.test(value) || 
+            /Street|Road|Colony|Town|City|District|Province/i.test(value)) {
+          if (result.address === 'Not Found' || result.address.includes('Network')) {
             result.address = value;
           }
         }
-        
-        // Mobile number detection
-        if (key.includes('mobile') || key.includes('phone') || key.includes('number') || 
-            key.includes('contact') || key.includes('cell')) {
-          const cleanNumber = value.replace(/[^0-9]/g, '');
-          if (cleanNumber.length === 11 || cleanNumber.length === 10) {
-            result.number = cleanNumber;
-          }
-        }
       }
-    });
-
-    // Try to find CNIC in text (13 digits)
+    }
+    
+    // If CNIC not found, search in entire text
     if (result.cnic === 'Not Found') {
       const cnicMatch = textContent.match(/\b[0-9]{13}\b/);
       if (cnicMatch) {
         result.cnic = cnicMatch[0];
       }
     }
-
-    // Try to find mobile number in text (11 digits starting with 03)
+    
+    // If number not found, search in entire text
     if (result.number === 'Not Found') {
       const numberMatch = textContent.match(/\b03[0-9]{9}\b/);
       if (numberMatch) {
         result.number = numberMatch[0];
       }
     }
-
-    // Try to find name patterns
-    if (result.name === 'Not Found') {
-      const namePatterns = [
-        /Name[:\s]+([A-Z\s]+)/i,
-        /Customer[:\s]+([A-Z\s]+)/i,
-        /Owner[:\s]+([A-Z\s]+)/i,
-        /Subscriber[:\s]+([A-Z\s]+)/i,
-        /Holder[:\s]+([A-Z\s]+)/i
-      ];
-      
-      for (let pattern of namePatterns) {
-        const match = textContent.match(pattern);
-        if (match && match[1] && match[1].trim().length > 2) {
-          result.name = match[1].trim();
+    
+    // Better name extraction from table structure
+    const namePatterns = [
+      /Name\s*[:：]\s*([A-Za-z\s]+)/i,
+      /Customer\s*[:：]\s*([A-Za-z\s]+)/i,
+      /Owner\s*[:：]\s*([A-Za-z\s]+)/i,
+      /Subscriber\s*[:：]\s*([A-Za-z\s]+)/i,
+      /Holder\s*[:：]\s*([A-Za-z\s]+)/i
+    ];
+    
+    for (let pattern of namePatterns) {
+      const nameMatch = textContent.match(pattern);
+      if (nameMatch && nameMatch[1] && nameMatch[1].trim().length > 2) {
+        const name = nameMatch[1].trim();
+        if (!name.includes('Network') && !name.includes('Address') && !name.includes('CNIC')) {
+          result.name = name;
           break;
         }
       }
     }
-
-    // Try to find address patterns
-    if (result.address === 'Not Found') {
-      const addressPatterns = [
-        /Address[:\s]+([A-Za-z0-9\s,.\-]+)/i,
-        /Location[:\s]+([A-Za-z0-9\s,.\-]+)/i,
-        /City[:\s]+([A-Za-z\s]+)/i,
-        /District[:\s]+([A-Za-z\s]+)/i
-      ];
-      
-      for (let pattern of addressPatterns) {
-        const match = textContent.match(pattern);
-        if (match && match[1] && match[1].trim().length > 2) {
-          result.address = match[1].trim();
+    
+    // Better address extraction
+    const addressPatterns = [
+      /Address\s*[:：]\s*([A-Za-z0-9\s,.\-]+)/i,
+      /Location\s*[:：]\s*([A-Za-z0-9\s,.\-]+)/i,
+      /City\s*[:：]\s*([A-Za-z\s]+)/i,
+      /District\s*[:：]\s*([A-Za-z\s]+)/i
+    ];
+    
+    for (let pattern of addressPatterns) {
+      const addrMatch = textContent.match(pattern);
+      if (addrMatch && addrMatch[1] && addrMatch[1].trim().length > 2) {
+        const address = addrMatch[1].trim();
+        if (!address.includes('Network') && !address.includes('CNIC') && !address.includes('030')) {
+          result.address = address;
           break;
         }
       }
     }
-
-    // Clean up - remove dashes from CNIC
+    
+    // If address still has garbage data, try to extract clean address
+    if (result.address.includes('Network') || result.address.includes('030') || result.address.includes('GHULAM')) {
+      // Look for proper address format
+      const cleanAddrMatch = textContent.match(/([A-Za-z]+(?:\s+[A-Za-z]+)*,\s*[A-Za-z]+(?:\s+[A-Za-z]+)*)/);
+      if (cleanAddrMatch) {
+        result.address = cleanAddrMatch[1];
+      } else {
+        // Try to find address from table
+        for (let i = 0; i < tdMatches.length; i++) {
+          const value = tdMatches[i];
+          if (value.includes('Street') || value.includes('Road') || value.includes('Colony') || 
+              value.includes('Town') || value.includes('City') || value.includes('District')) {
+            result.address = value;
+            break;
+          }
+        }
+      }
+    }
+    
+    // If name has garbage data, clean it
+    if (result.name.includes('Network') || result.name.includes('Address') || result.name.includes('CNIC')) {
+      // Try to find proper name from table
+      for (let i = 0; i < tdMatches.length; i++) {
+        const value = tdMatches[i];
+        if (/^[A-Za-z]{2,}\s+[A-Za-z]{2,}/.test(value) && !value.includes('@') && !value.includes('.')) {
+          result.name = value;
+          break;
+        }
+      }
+    }
+    
+    // Clean CNIC - remove dashes
     if (result.cnic !== 'Not Found') {
       result.cnic = result.cnic.replace(/[^0-9]/g, '');
     }
-
-    // Clean up - remove dashes from number
+    
+    // Clean number - remove dashes
     if (result.number !== 'Not Found') {
       result.number = result.number.replace(/[^0-9]/g, '');
     }
-
-    // Check if we found any data
-    if (result.name !== 'Not Found' || result.cnic !== 'Not Found' || 
-        result.address !== 'Not Found' || result.number !== 'Not Found') {
+    
+    // Check if we found valid data
+    if (result.name !== 'Not Found' && result.name !== 'CNIC Address Network' && 
+        !result.name.includes('Network') && !result.name.includes('Address')) {
       result.status = 'Success';
+    } else if (result.cnic !== 'Not Found' || result.number !== 'Not Found') {
+      result.status = 'Success';
+    }
+    
+    // Final cleanup - if name still has garbage, set to Not Found
+    if (result.name === 'CNIC Address Network' || result.name.includes('Network')) {
+      result.name = 'Not Found';
+    }
+    
+    if (result.address === 'CNIC Address Network' || result.address.includes('Network')) {
+      result.address = 'Not Found';
+    }
+    
+    // Remove any CNIC or number from address
+    if (result.address !== 'Not Found') {
+      result.address = result.address.replace(/\b[0-9]{11,13}\b/g, '').trim();
+      result.address = result.address.replace(/GHULAM\s+MURTAZA/g, '').trim();
+      result.address = result.address.replace(/Network/g, '').trim();
+      if (result.address === '') result.address = 'Not Found';
     }
 
   } catch (e) {
@@ -217,4 +262,4 @@ function parseHTML(html, query) {
   }
 
   return result;
-}
+            }
