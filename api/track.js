@@ -1,7 +1,6 @@
 const axios = require('axios');
 
 module.exports = async (req, res) => {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -21,6 +20,7 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Clean input - remove all non-digits
     let cleanQuery = query.replace(/[^0-9]/g, '');
     
     if (cleanQuery.length < 10) {
@@ -57,7 +57,7 @@ module.exports = async (req, res) => {
     
     return res.status(200).json({
       search_type: searchType,
-      input: formatInput(cleanQuery),
+      input: cleanQuery,
       ...result,
       credit: 'Credit: @AZ_Tricks (https://t.me/AZ_Tricks)'
     });
@@ -77,109 +77,140 @@ function parseHTML(html, query) {
     name: 'Not Found',
     cnic: 'Not Found',
     address: 'Not Found',
-    status: 'Failed',
-    raw_data: []
+    status: 'Failed'
   };
 
   try {
-    const cleanHtml = html.replace(/\s+/g, ' ').replace(/<[^>]*>/g, ' ').trim();
+    // Extract all text content
+    const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     
-    const patterns = {
-      name: [
-        /Name\s*[:：]\s*([^<\n]+)/i,
-        /Full Name\s*[:：]\s*([^<\n]+)/i,
-        /Customer Name\s*[:：]\s*([^<\n]+)/i,
-        /Owner Name\s*[:：]\s*([^<\n]+)/i
-      ],
-      cnic: [
-        /CNIC\s*[:：]\s*([0-9]{5}[-][0-9]{7}[-][0-9])/i,
-        /NIC\s*[:：]\s*([0-9]{5}[-][0-9]{7}[-][0-9])/i,
-        /ID Card\s*[:：]\s*([0-9]{5}[-][0-9]{7}[-][0-9])/i,
-        /([0-9]{5}[-][0-9]{7}[-][0-9])/i,
-        /([0-9]{13})/i
-      ],
-      address: [
-        /Address\s*[:：]\s*([^<\n]+)/i,
-        /Present Address\s*[:：]\s*([^<\n]+)/i,
-        /Permanent Address\s*[:：]\s*([^<\n]+)/i,
-        /Location\s*[:：]\s*([^<\n]+)/i
-      ],
-      number: [
-        /Number\s*[:：]\s*([0-9+\- ]+)/i,
-        /Mobile\s*[:：]\s*([0-9+\- ]+)/i,
-        /Phone\s*[:：]\s*([0-9+\- ]+)/i
-      ]
-    };
-
-    Object.keys(patterns).forEach(key => {
-      for (let pattern of patterns[key]) {
-        const match = cleanHtml.match(pattern);
-        if (match && match[1]) {
-          const value = match[1].trim();
-          if (value && value.length > 2) {
-            if (key === 'cnic') {
-              result.cnic = formatCNIC(value);
-            } else if (key === 'number') {
-              result.number = formatNumber(value);
-            } else {
-              result[key] = value;
-            }
-            break;
-          }
-        }
-      }
-    });
-
-    const tableRows = html.match(/<tr[^>]*>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<\/tr>/gi);
-    if (tableRows) {
-      tableRows.forEach(row => {
+    // Extract table data with better parsing
+    const tableData = [];
+    const tableMatches = html.match(/<tr[^>]*>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<\/tr>/gi);
+    
+    if (tableMatches) {
+      tableMatches.forEach(row => {
         const tdMatch = row.match(/<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/i);
         if (tdMatch) {
-          const key = tdMatch[1].replace(/<[^>]*>/g, '').trim().toLowerCase();
+          const key = tdMatch[1].replace(/<[^>]*>/g, '').trim();
           const value = tdMatch[2].replace(/<[^>]*>/g, '').trim();
-          
-          if (value && value.length > 2) {
-            if (key.includes('name') || key.includes('full name')) {
-              result.name = value;
-            } else if (key.includes('cnic') || key.includes('nic') || key.includes('id')) {
-              result.cnic = formatCNIC(value);
-            } else if (key.includes('address') || key.includes('location')) {
-              result.address = value;
-            } else if (key.includes('mobile') || key.includes('phone') || key.includes('number')) {
-              result.number = formatNumber(value);
-            }
-            result.raw_data.push({ label: key, value: value });
+          if (key && value) {
+            tableData.push({ key: key.toLowerCase(), value: value });
           }
         }
       });
     }
 
-    const divData = html.match(/<div[^>]*>[\s\S]*?<strong>([^<]+)<\/strong>[\s\S]*?([^<]+)<\/div>/gi);
-    if (divData) {
-      divData.forEach(div => {
-        const match = div.match(/<strong>([^<]+)<\/strong>[\s\S]*?>([^<]+)</i);
-        if (match) {
-          const key = match[1].trim().toLowerCase();
-          const value = match[2].trim();
-          if (value && value.length > 2) {
-            if (key.includes('name')) result.name = value;
-            else if (key.includes('cnic')) result.cnic = formatCNIC(value);
-            else if (key.includes('address')) result.address = value;
+    // Extract data from table
+    tableData.forEach(item => {
+      const key = item.key.toLowerCase();
+      const value = item.value;
+      
+      if (value && value.length > 1) {
+        // Name detection
+        if (key.includes('name') || key.includes('full name') || key.includes('customer') || 
+            key.includes('owner') || key.includes('holder') || key.includes('subscriber')) {
+          if (!result.name || result.name === 'Not Found') {
+            result.name = value;
           }
         }
-      });
-    }
-
-    if (result.name !== 'Not Found' || result.cnic !== 'Not Found' || result.address !== 'Not Found') {
-      result.status = 'Success';
-    }
-
-    Object.keys(result).forEach(key => {
-      if (typeof result[key] === 'string') {
-        result[key] = result[key].replace(/[^\w\s\-.,()/]/g, '').trim();
-        if (result[key] === '') result[key] = 'Not Found';
+        
+        // CNIC detection
+        if (key.includes('cnic') || key.includes('nic') || key.includes('id') || 
+            key.includes('identification') || key.includes('identity')) {
+          const cleanCNIC = value.replace(/[^0-9]/g, '');
+          if (cleanCNIC.length === 13) {
+            result.cnic = cleanCNIC;
+          }
+        }
+        
+        // Address detection
+        if (key.includes('address') || key.includes('location') || key.includes('city') || 
+            key.includes('district') || key.includes('province') || key.includes('area')) {
+          if (!result.address || result.address === 'Not Found') {
+            result.address = value;
+          }
+        }
+        
+        // Mobile number detection
+        if (key.includes('mobile') || key.includes('phone') || key.includes('number') || 
+            key.includes('contact') || key.includes('cell')) {
+          const cleanNumber = value.replace(/[^0-9]/g, '');
+          if (cleanNumber.length === 11 || cleanNumber.length === 10) {
+            result.number = cleanNumber;
+          }
+        }
       }
     });
+
+    // Try to find CNIC in text (13 digits)
+    if (result.cnic === 'Not Found') {
+      const cnicMatch = textContent.match(/\b[0-9]{13}\b/);
+      if (cnicMatch) {
+        result.cnic = cnicMatch[0];
+      }
+    }
+
+    // Try to find mobile number in text (11 digits starting with 03)
+    if (result.number === 'Not Found') {
+      const numberMatch = textContent.match(/\b03[0-9]{9}\b/);
+      if (numberMatch) {
+        result.number = numberMatch[0];
+      }
+    }
+
+    // Try to find name patterns
+    if (result.name === 'Not Found') {
+      const namePatterns = [
+        /Name[:\s]+([A-Z\s]+)/i,
+        /Customer[:\s]+([A-Z\s]+)/i,
+        /Owner[:\s]+([A-Z\s]+)/i,
+        /Subscriber[:\s]+([A-Z\s]+)/i,
+        /Holder[:\s]+([A-Z\s]+)/i
+      ];
+      
+      for (let pattern of namePatterns) {
+        const match = textContent.match(pattern);
+        if (match && match[1] && match[1].trim().length > 2) {
+          result.name = match[1].trim();
+          break;
+        }
+      }
+    }
+
+    // Try to find address patterns
+    if (result.address === 'Not Found') {
+      const addressPatterns = [
+        /Address[:\s]+([A-Za-z0-9\s,.\-]+)/i,
+        /Location[:\s]+([A-Za-z0-9\s,.\-]+)/i,
+        /City[:\s]+([A-Za-z\s]+)/i,
+        /District[:\s]+([A-Za-z\s]+)/i
+      ];
+      
+      for (let pattern of addressPatterns) {
+        const match = textContent.match(pattern);
+        if (match && match[1] && match[1].trim().length > 2) {
+          result.address = match[1].trim();
+          break;
+        }
+      }
+    }
+
+    // Clean up - remove dashes from CNIC
+    if (result.cnic !== 'Not Found') {
+      result.cnic = result.cnic.replace(/[^0-9]/g, '');
+    }
+
+    // Clean up - remove dashes from number
+    if (result.number !== 'Not Found') {
+      result.number = result.number.replace(/[^0-9]/g, '');
+    }
+
+    // Check if we found any data
+    if (result.name !== 'Not Found' || result.cnic !== 'Not Found' || 
+        result.address !== 'Not Found' || result.number !== 'Not Found') {
+      result.status = 'Success';
+    }
 
   } catch (e) {
     console.error('Parsing error:', e);
@@ -187,28 +218,3 @@ function parseHTML(html, query) {
 
   return result;
 }
-
-function formatCNIC(value) {
-  let digits = value.replace(/[^0-9]/g, '');
-  if (digits.length === 13) {
-    return `${digits.slice(0,5)}-${digits.slice(5,12)}-${digits.slice(12)}`;
-  }
-  return value;
-}
-
-function formatNumber(value) {
-  let digits = value.replace(/[^0-9]/g, '');
-  if (digits.length === 11) {
-    return digits;
-  }
-  return value;
-}
-
-function formatInput(value) {
-  if (value.length === 13) {
-    return formatCNIC(value);
-  } else if (value.length === 11) {
-    return value;
-  }
-  return value;
-          }
