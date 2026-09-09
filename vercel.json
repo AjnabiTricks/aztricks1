@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "name": "aztricks1",
+  "functions": {
+    "api/track.js": {
+      "maxDuration": 30
+    }
+  }
+}
