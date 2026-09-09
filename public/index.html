@@ -184,6 +184,14 @@
             color: #764ba2;
         }
         
+        .card .value.found {
+            color: #28a745;
+        }
+        
+        .card .value.not-found {
+            color: #dc3545;
+        }
+        
         .credit {
             text-align: center;
             margin-top: 18px;
@@ -260,7 +268,6 @@
             color: #999;
         }
         
-        /* Mobile optimizations */
         @media (max-width: 480px) {
             .container {
                 padding: 18px 14px;
@@ -384,7 +391,6 @@
         const resultDiv = document.getElementById('result');
         const loader = document.getElementById('loader');
 
-        // Quick fill buttons
         document.querySelectorAll('.quick-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 queryInput.value = btn.dataset.value;
@@ -417,15 +423,25 @@
                     return;
                 }
 
-                // Display search type
                 document.getElementById('searchType').innerHTML = 
                     `🔍 ${data.search_type}: <strong>${data.input || query}</strong>`;
                 
-                // Display results
-                document.getElementById('numberValue').textContent = data.number || 'Not Found';
-                document.getElementById('nameValue').textContent = data.name || 'Not Found';
-                document.getElementById('cnicValue').textContent = data.cnic || 'Not Found';
-                document.getElementById('addressValue').textContent = data.address || 'Not Found';
+                // Display with color coding
+                const numberEl = document.getElementById('numberValue');
+                numberEl.textContent = data.number || 'Not Found';
+                numberEl.className = 'value ' + (data.number !== 'Not Found' ? 'found' : 'not-found');
+                
+                const nameEl = document.getElementById('nameValue');
+                nameEl.textContent = data.name || 'Not Found';
+                nameEl.className = 'value ' + (data.name !== 'Not Found' ? 'found' : 'not-found');
+                
+                const cnicEl = document.getElementById('cnicValue');
+                cnicEl.textContent = data.cnic || 'Not Found';
+                cnicEl.className = 'value ' + (data.cnic !== 'Not Found' ? 'found' : 'not-found');
+                
+                const addressEl = document.getElementById('addressValue');
+                addressEl.textContent = data.address || 'Not Found';
+                addressEl.className = 'value ' + (data.address !== 'Not Found' ? 'found' : 'not-found');
                 
                 const statusEl = document.getElementById('statusValue');
                 if (data.status === 'Success') {
@@ -445,12 +461,10 @@
             }
         });
 
-        // Enter key support
         queryInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') searchBtn.click();
         });
 
-        // Only allow numbers
         queryInput.addEventListener('input', function() {
             this.value = this.value.replace(/[^0-9]/g, '');
         });
